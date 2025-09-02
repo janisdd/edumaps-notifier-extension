@@ -1,40 +1,35 @@
 <html>
   <head>
+    <meta charset="utf-8">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
     <h1>Edu Maps Notifier</h1>
 
+    <section>
+      <button id="clear-state">Clear state</button>
+      <button id="compare-state">Compare state</button>
+    </section>
 
-    <div>
-        <h3>Geänderte Boxen</h3>
+    <section style="margin-top: 12px;">
+      <label>
+        <input type="checkbox" id="auto-reload-enabled" />
+        Auto reload every
+      </label>
+      <input id="auto-reload-minutes" type="number" min="1" value="5" style="width: 60px;" />
+      <span>minute(s)</span>
+    </section>
 
-        <div>
+    <section style="margin-top: 8px;">
+      <small id="last-captured-at"></small>
+    </section>
 
-            <div id="changed-boxes-list" class="changed-boxes-list">
-              <div class="box-item">
-                <div class="content">
-                  Box mit Id 123 wurde geändert
-                </div>
-
-                <div class="time">
-                  10:30 27.08.25
-                </div>
-              </div>
-              
-              <div class="box-item">
-                <div class="content">
-                  Box mit Id 123 wurde geändert
-                </div>
-
-                <div class="time">
-                  10:30 27.08.25
-                </div>
-              </div>
-            </div>
-
-        </div>
-    </div>
+    <section style="margin-top: 12px;">
+      <h3>Geänderte Boxen</h3>
+      <div>
+        <div id="changed-boxes-list" class="changed-boxes-list"></div>
+      </div>
+    </section>
 
     <script src="index.js"></script>
   </body>

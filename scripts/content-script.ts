@@ -17,6 +17,9 @@ type ChangeInfo = {
 let allKnownBoxesByBoxId = new Map<string, Box>()
 let allKnownBoxesArray: Box[] = []
 
+const STORAGE_CAPTURED_STATE_KEY = 'capturedBoxesState'
+const STORAGE_CAPTURED_STATE_AT_KEY = 'capturedBoxesStateAt'
+
 function getAllBoxes(): Box[] {
 	const allBoxeWraps = Array.from(document.querySelectorAll(`#main-content .box-wrap`)) as HTMLDivElement[]
 	const allBoxes: Box[] = []
@@ -69,6 +72,15 @@ function boxesToMap(boxes: Box[]): Map<string, Box> {
 	return map
 }
 
+function getAllBoxesData(): { boxes: Box[], boxesMap: Map<string, Box> } {
+	const currBoxes = getAllBoxes()
+	const currBoxesMap = boxesToMap(currBoxes)
+
+	return {
+		boxes: currBoxes,
+		boxesMap: currBoxesMap
+	}
+}
 
 function compareBoxStates(): ChangeInfo | null {
 
@@ -193,16 +205,49 @@ function _showBox(box: Box, tabId: number) {
 
 function main() {
 	console.log(`main called`);
-	
-	const handler = setInterval(checkBoxesChanged, 5000)
+
+	// Automatically compute compare without overwriting baseline and persist a rendered result for the popup
+	chrome.storage.local.get(['capturedBoxesState', 'initializeBaselineOnNextLoad'], (items) => {
+		const prevMapObj = items['capturedBoxesState'] as Record<string, Box> | undefined
+		const shouldInit = Boolean(items['initializeBaselineOnNextLoad'])
+		if (!prevMapObj) {
+			if (shouldInit) {
+				const current = getAllBoxes()
+				const baselineObj: Record<string, Box> = {}
+				for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
+				const capturedAt = (new Date()).toISOString()
+				chrome.storage.local.set({ capturedBoxesState: baselineObj, capturedBoxesStateAt: capturedAt, initializeBaselineOnNextLoad: false })
+			}
+			return
+		}
+		const current = getAllBoxes()
+		const currentMap = boxesToMap(current)
+		const prevIds = new Set(Object.keys(prevMapObj))
+		const currentIds = new Set(Array.from(currentMap.keys()))
+		const added: string[] = []
+		const removed: string[] = []
+		for (const id of currentIds) if (!prevIds.has(id)) added.push(id)
+		for (const id of prevIds) if (!currentIds.has(id)) removed.push(id)
+		const now = new Date()
+		const entries: string[] = []
+		for (const id of added) entries.push(`<div class=\"box-item\" data-box-id=\"${id}\"><div class=\"content\">Neue Box: ${id}</div><div class=\"time\">${now.toISOString()}</div></div>`)
+		chrome.storage.local.set({ popupChangedListHtml: entries.join(''), capturedBoxesStateAt: now.toISOString() })
+		if (added.length > 0) {
+			const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+			chrome.runtime.sendMessage(msg)
+		}
+	})
+	// const handler = setInterval(checkBoxesChanged, 5000)
 
 	chrome.runtime.onMessage.addListener((message: BoxChangedListClickedMessage) => {
 		console.log(message)
 
 		if (message && message.action === 'showBox') {
 			let boxId = message.boxId
+			// known box data is somehow outdated, so we need to update it
+			const { boxes, boxesMap } = getAllBoxesData()
 
-			let knownBox = allKnownBoxesByBoxId.get(boxId)
+			let knownBox = boxesMap.get(boxId)
 			if (!knownBox) {
 				console.warn(`Could not find box with id ${boxId}`)
 				return false // void?
@@ -211,6 +256,76 @@ function main() {
 			_showBox(knownBox, message.tabId)
 			return false // void?
 		}
+	})
+
+	// Listen for popup actions: capture/compare
+	chrome.runtime.onMessage.addListener((message: CaptureStateMessage | CompareStateMessage, _sender, sendResponse: (response?: any) => void) => {
+		if (!message || !('action' in message)) {
+			return false
+		}
+
+		if (message.action === 'CAPTURE_STATE') {
+			const boxes = getAllBoxes()
+			const mapObj: Record<string, Box> = {}
+			for (let i = 0; i < boxes.length; i++) {
+				const b = boxes[i]
+				mapObj[b.id] = b
+			}
+			const capturedAt = (new Date()).toISOString()
+			chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: mapObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
+				sendResponse({ ok: true, capturedCount: boxes.length } as CaptureStateResponse)
+			})
+			return true
+		}
+
+		if (message.action === 'COMPARE_STATE') {
+			chrome.storage.local.get(STORAGE_CAPTURED_STATE_KEY, (items) => {
+				const prevMapObj = items[STORAGE_CAPTURED_STATE_KEY] as Record<string, Box> | undefined
+				const current = getAllBoxes()
+				const currentMap = boxesToMap(current)
+
+				const added: string[] = []
+				const removed: string[] = []
+
+				if (!prevMapObj) {
+					// no previous baseline: set baseline but report no changes
+					// set new baseline to current
+					const baselineObj: Record<string, Box> = {}
+					for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
+					const capturedAt = (new Date()).toISOString()
+					chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: baselineObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
+						sendResponse({ ok: true, addedBoxIds: [], removedBoxIds: [] } as CompareStateResponse)
+					})
+					return true
+				}
+
+				const prevIds = new Set(Object.keys(prevMapObj))
+				const currentIds = new Set(Array.from(currentMap.keys()))
+
+				for (const id of currentIds) {
+					if (!prevIds.has(id)) added.push(id)
+				}
+				for (const id of prevIds) {
+					if (!currentIds.has(id)) removed.push(id)
+				}
+
+				// set new baseline to current
+				const baselineObj: Record<string, Box> = {}
+				for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
+				const capturedAt = (new Date()).toISOString()
+				chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: baselineObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, async () => {
+					// notify service worker if there are new boxes
+					if (added.length > 0) {
+						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+						await chrome.runtime.sendMessage(msg)
+					}
+					sendResponse({ ok: true, addedBoxIds: added, removedBoxIds: removed } as CompareStateResponse)
+				})
+			})
+			return true
+		}
+
+		return false
 	})
 
 }

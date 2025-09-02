@@ -8,18 +8,13 @@
   },
   "action": {
     
-    "default_title": "Toggle Notification Helper"
+    "default_title": "Toggle Notification Helper",
+    "default_popup": "ui/index.html"
   },
   "content_scripts": [
     {
       "matches": ["https://www.edumaps.de/*"],
       "js": ["scripts/content-script.js"]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["injections/injected.js"],
-      "matches": ["https://www.edumaps.de/*"]
     }
   ],
   "host_permissions": [
@@ -29,6 +24,8 @@
     "notifications",
     "scripting",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "storage",
+    "alarms"
   ]
 }

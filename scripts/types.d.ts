@@ -27,3 +27,45 @@ type SiteNewBoxMessage = {
 	boxWrapId: string
 	createdAt: string // date as ISO string
 }
+
+// Popup -> Content script
+type CaptureStateMessage = {
+	action: 'CAPTURE_STATE'
+}
+
+type CompareStateMessage = {
+	action: 'COMPARE_STATE'
+}
+
+type CaptureStateResponse = {
+	ok: true
+	capturedCount: number
+}
+
+type CompareStateResponse = {
+	ok: true
+	addedBoxIds: string[]
+	removedBoxIds: string[]
+}
+
+// Popup -> Service worker
+type SetAutoReloadMessage = {
+	action: 'SET_AUTO_RELOAD'
+	enabled: boolean
+	minutes: number
+}
+
+type GetAutoReloadStateMessage = {
+	action: 'GET_AUTO_RELOAD_STATE'
+}
+
+type GetAutoReloadStateResponse = {
+	enabled: boolean
+	minutes: number
+}
+
+// Content script -> Service worker: summary about newly added boxes after compare
+type NewBoxesFoundMessage = {
+	type: 'NEW_BOXES_FOUND'
+	count: number
+}
