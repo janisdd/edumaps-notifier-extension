@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Edu Maps Notify Helper",
+  "version": "1.0.0",
+	"description": "",
+  "background": {
+    "service_worker": "scripts/service-worker.js"
+  },
+  "action": {
+    
+    "default_title": "Toggle Notification Helper"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.edumaps.de/*"],
+      "js": ["scripts/content-script.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injections/injected.js"],
+      "matches": ["https://www.edumaps.de/*"]
+    }
+  ],
+  "host_permissions": [
+    "https://www.edumaps.de/*"
+  ],
+  "permissions": [
+    "notifications",
+    "scripting",
+    "tabs",
+    "activeTab"
+  ]
+}

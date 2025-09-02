@@ -1,0 +1,15 @@
+{
+  "name": "edumaps-notifier-extension",
+  "version": "1.0.0",
+  "main": "index.js",
+  "repository": "git@github.com:janisdd/edumaps-notifier-extension.git",
+  "author": "Janis Daniel Dähne",
+  "license": "MIT",
+  "scripts": {
+    "watch": "tsc -w -p ."
+  },
+  "dependencies": {
+    "chrome-types": "^0.1.373",
+    "typescript": "^5.9.2"
+  }
+}
