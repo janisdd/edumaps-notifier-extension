@@ -20,7 +20,30 @@ let allKnownBoxesArray: Box[] = []
 const STORAGE_CAPTURED_STATE_KEY = 'capturedBoxesState'
 const STORAGE_CAPTURED_STATE_AT_KEY = 'capturedBoxesStateAt'
 
+// Simple structured logger for this file (scoped per file)
+function createContentLogger(namespace: string) {
+	const base = (level: 'debug' | 'info' | 'warn' | 'error') => (...args: any[]) => {
+		const ts = new Date().toISOString()
+		const prefix = `[${ts}] [content-script]` + (namespace ? ` [${namespace}]` : '')
+		// Map to appropriate console method
+		const method = level === 'debug' ? console.debug
+			: level === 'info' ? console.info
+			: level === 'warn' ? console.warn
+			: console.error
+		method(prefix, ...args)
+	}
+	return {
+		debug: base('debug'),
+		info: base('info'),
+		warn: base('warn'),
+		error: base('error'),
+	}
+}
+
+const csLog = createContentLogger('')
+
 function getAllBoxes(): Box[] {
+	csLog.debug('getAllBoxes: start')
 	const allBoxeWraps = Array.from(document.querySelectorAll(`#main-content .box-wrap`)) as HTMLDivElement[]
 	const allBoxes: Box[] = []
 
@@ -29,7 +52,7 @@ function getAllBoxes(): Box[] {
 		const boxWrapId = boxWrapDiv.getAttribute("id")
 
 		if (!boxWrapId) {
-			console.warn("box wrapper without id found, skipping")
+			csLog.warn('getAllBoxes: box wrapper without id found, skipping')
 			continue
 		}
 
@@ -41,7 +64,7 @@ function getAllBoxes(): Box[] {
 		const boxId = boxDiv.getAttribute("data-boxid")
 
 		if (!boxId) {
-			console.warn("box without id found, skipping")
+			csLog.warn('getAllBoxes: box without id found, skipping')
 			continue
 		}
 
@@ -57,11 +80,13 @@ function getAllBoxes(): Box[] {
 		
 	}
 
+	csLog.info('getAllBoxes: done', { count: allBoxes.length })
 	return allBoxes
 }
 
 
 function boxesToMap(boxes: Box[]): Map<string, Box> {
+	csLog.debug('boxesToMap: start', { count: boxes.length })
 	const map = new Map<string, Box>()
 
 	for (let i = 0; i < boxes.length; i++) {
@@ -69,21 +94,25 @@ function boxesToMap(boxes: Box[]): Map<string, Box> {
 		map.set(box.id, box)
 	}
 
+	csLog.debug('boxesToMap: done', { count: map.size })
 	return map
 }
 
 function getAllBoxesData(): { boxes: Box[], boxesMap: Map<string, Box> } {
+	csLog.debug('getAllBoxesData: start')
 	const currBoxes = getAllBoxes()
 	const currBoxesMap = boxesToMap(currBoxes)
 
-	return {
+	const result = {
 		boxes: currBoxes,
 		boxesMap: currBoxesMap
 	}
+	csLog.debug('getAllBoxesData: done', { boxes: result.boxes.length })
+	return result
 }
 
 function compareBoxStates(): ChangeInfo | null {
-
+	csLog.debug('compareBoxStates: start')
 	const currBoxes = getAllBoxes()
 	const currBoxesMap = boxesToMap(currBoxes)
 
@@ -91,7 +120,7 @@ function compareBoxStates(): ChangeInfo | null {
 		allKnownBoxesByBoxId = currBoxesMap
 		allKnownBoxesArray = currBoxes
 
-		console.info(`${allKnownBoxesArray.length} Initial boxes found`, allKnownBoxesArray);
+		csLog.info('compareBoxStates: initial snapshot', { count: allKnownBoxesArray.length })
 		return null
 	}
 
@@ -122,21 +151,26 @@ function compareBoxStates(): ChangeInfo | null {
 		removedBoxes.push(oldBox)
 	}
 	
-	return {
+	const result = {
 		addedBoxes: newBoxes,
 		removedBoxes: removedBoxes,
 		allBoxes: currBoxes,
 		allBoxesMap: currBoxesMap,
 	}
+	csLog.info('compareBoxStates: diff computed', { added: newBoxes.length, removed: removedBoxes.length, total: currBoxes.length })
+	return result
 }
 
 
 async function checkBoxesChanged() {
-	console.log("checkBoxesChanged called")
+	csLog.info('checkBoxesChanged: called')
 	const changeInfo = compareBoxStates()
 
 	//first check
-	if (!changeInfo) return
+	if (!changeInfo) {
+		csLog.debug('checkBoxesChanged: initial call, no changes yet')
+		return
+	}
 
 	for (let i = 0; i < changeInfo.addedBoxes.length; i++) {
 		const addedBox = changeInfo.addedBoxes[i]
@@ -148,6 +182,7 @@ async function checkBoxesChanged() {
 			createdAt: (new Date()).toISOString()
 		}
 		
+		csLog.info('checkBoxesChanged: notifying service worker for new box', { boxId: addedBox.id, wrapId: addedBox.wrapId })
 		await chrome.runtime.sendMessage(message)
 	}
 
@@ -157,19 +192,21 @@ async function checkBoxesChanged() {
 
 	if (changeInfo.removedBoxes.length === 0 && changeInfo.addedBoxes.length === 0) {
 		// no new boxes and removed boxes -> no need to update
+		csLog.debug('checkBoxesChanged: no changes detected')
 		return
 	}
 
 	allKnownBoxesByBoxId = changeInfo.allBoxesMap
 	allKnownBoxesArray = changeInfo.allBoxes
-
+	csLog.debug('checkBoxesChanged: state updated', { total: allKnownBoxesArray.length })
 }
 
 //from edumaps
 declare var anchor_scroll_done: boolean
 declare function edu_anchor_scroll_to_box(boxIdWrapStr: string, aInt: number, tBool: boolean, rLink: null | HTMLAnchorElement): void
 function _showBox(box: Box, tabId: number) {
-
+	const l = createContentLogger('_showBox')
+	l.info('start', { boxId: box.id, wrapId: box.wrapId, tabId })
 	//create a tmp anchor el like this:
 	// <a class="inline selfopener" href="#fotosammlung">xyz</a>
 
@@ -189,7 +226,7 @@ function _showBox(box: Box, tabId: number) {
 	//get box wrapper: id: box-id
 	const boxWrapperEl = document.querySelector(`#${box.wrapId}`)
 	if (!boxWrapperEl) {
-		console.warn(`Could not find box wrapper with id #${box.wrapId}`)
+		l.warn('wrapper not found', { wrapId: box.wrapId })
 		return
 	}
 
@@ -200,18 +237,20 @@ function _showBox(box: Box, tabId: number) {
 	setTimeout(() => {
 		boxWrapperEl.classList.remove("hasbadge", "markbox", "doblink")
 	}, 2000)
-	
+	l.info('done')
 }
 
 function main() {
-	console.log(`main called`);
+	csLog.info('main: start')
 
 	// Automatically compute compare without overwriting baseline and persist a rendered result for the popup
 	chrome.storage.local.get(['capturedBoxesState', 'initializeBaselineOnNextLoad'], (items) => {
 		const prevMapObj = items['capturedBoxesState'] as Record<string, Box> | undefined
 		const shouldInit = Boolean(items['initializeBaselineOnNextLoad'])
+		csLog.debug('main: storage loaded', { hasBaseline: Boolean(prevMapObj), shouldInit })
 		if (!prevMapObj) {
 			if (shouldInit) {
+				csLog.info('main: initializing baseline on next load flag present, capturing baseline')
 				const current = getAllBoxes()
 				const baselineObj: Record<string, Box> = {}
 				for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
@@ -234,13 +273,14 @@ function main() {
 		chrome.storage.local.set({ popupChangedListHtml: entries.join(''), capturedBoxesStateAt: now.toISOString() })
 		if (added.length > 0) {
 			const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+			csLog.info('main: notifying NEW_BOXES_FOUND', { count: added.length })
 			chrome.runtime.sendMessage(msg)
 		}
 	})
 	// const handler = setInterval(checkBoxesChanged, 5000)
 
 	chrome.runtime.onMessage.addListener((message: BoxChangedListClickedMessage) => {
-		console.log(message)
+		csLog.debug('onMessage(BoxChangedListClickedMessage): received', message)
 
 		if (message && message.action === 'showBox') {
 			let boxId = message.boxId
@@ -249,7 +289,7 @@ function main() {
 
 			let knownBox = boxesMap.get(boxId)
 			if (!knownBox) {
-				console.warn(`Could not find box with id ${boxId}`)
+				csLog.warn('showBox: unknown box id', { boxId })
 				return false // void?
 			}
 			
@@ -261,10 +301,12 @@ function main() {
 	// Listen for popup actions: capture/compare
 	chrome.runtime.onMessage.addListener((message: CaptureStateMessage | CompareStateMessage, _sender, sendResponse: (response?: any) => void) => {
 		if (!message || !('action' in message)) {
+			csLog.warn('onMessage: missing or invalid action')
 			return false
 		}
 
 		if (message.action === 'CAPTURE_STATE') {
+			csLog.info('onMessage: CAPTURE_STATE')
 			const boxes = getAllBoxes()
 			const mapObj: Record<string, Box> = {}
 			for (let i = 0; i < boxes.length; i++) {
@@ -273,12 +315,14 @@ function main() {
 			}
 			const capturedAt = (new Date()).toISOString()
 			chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: mapObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
+				csLog.info('CAPTURE_STATE: stored', { count: boxes.length })
 				sendResponse({ ok: true, capturedCount: boxes.length } as CaptureStateResponse)
 			})
 			return true
 		}
 
 		if (message.action === 'COMPARE_STATE') {
+			csLog.info('onMessage: COMPARE_STATE')
 			chrome.storage.local.get(STORAGE_CAPTURED_STATE_KEY, (items) => {
 				const prevMapObj = items[STORAGE_CAPTURED_STATE_KEY] as Record<string, Box> | undefined
 				const current = getAllBoxes()
@@ -290,6 +334,7 @@ function main() {
 				if (!prevMapObj) {
 					// no previous baseline: set baseline but report no changes
 					// set new baseline to current
+					csLog.info('COMPARE_STATE: no baseline found, creating one')
 					const baselineObj: Record<string, Box> = {}
 					for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
 					const capturedAt = (new Date()).toISOString()
@@ -317,8 +362,10 @@ function main() {
 					// notify service worker if there are new boxes
 					if (added.length > 0) {
 						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+						csLog.info('COMPARE_STATE: notifying NEW_BOXES_FOUND', { count: added.length })
 						await chrome.runtime.sendMessage(msg)
 					}
+					csLog.info('COMPARE_STATE: done', { added: added.length, removed: removed.length })
 					sendResponse({ ok: true, addedBoxIds: added, removedBoxIds: removed } as CompareStateResponse)
 				})
 			})

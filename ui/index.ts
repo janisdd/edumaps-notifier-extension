@@ -20,7 +20,8 @@ function formatData(date: Date): string {
 
 
 function createBoxChangedEntry(boxData: BoxData) {
-
+	const log = createPopupLogger('createBoxChangedEntry')
+	log.debug('start', { boxId: boxData.boxId })
     let boxTemplate = `
     <div class="box-item" id="${boxData.boxId}">
         <div class="content">
@@ -32,18 +33,20 @@ function createBoxChangedEntry(boxData: BoxData) {
         </div>
     </div>
 `
+    log.debug('done')
 }
 
 function addClickListener(boxData: BoxData) {
+    const log = createPopupLogger('addClickListener')
     let el = document.getElementById(boxData.boxId)
     if (el) {
         el.addEventListener('click', () => {
-            console.log(`Box with id ${boxData.boxId} clicked`)
+            log.info('clicked', { boxId: boxData.boxId })
 
             chrome.tabs.query({active: true, currentWindow: true}, function(tabs){
                 const activeTab = tabs[0]
                 const tabId = activeTab && typeof activeTab.id === 'number' ? activeTab.id : undefined
-                if (typeof tabId !== 'number') return
+                if (typeof tabId !== 'number') { log.warn('no active tab id'); return }
                 const message: BoxChangedListClickedMessage = {
                     action: 'showBox',
                     boxId: boxData.boxId,
@@ -55,8 +58,25 @@ function addClickListener(boxData: BoxData) {
     }
 }
 
+
+// Simple structured logger for this file
+function createPopupLogger(namespace: string) {
+	const base = (level: 'debug' | 'info' | 'warn' | 'error') => (...args: any[]) => {
+		const ts = new Date().toISOString()
+		const prefix = `[${ts}] [popup]` + (namespace ? ` [${namespace}]` : '')
+		const method = level === 'debug' ? console.debug
+			: level === 'info' ? console.info
+			: level === 'warn' ? console.warn
+			: console.error
+		method(prefix, ...args)
+	}
+	return { debug: base('debug'), info: base('info'), warn: base('warn'), error: base('error') }
+}
+
+const popupLog = createPopupLogger('');
+
 (chrome.runtime.onMessage.addListener as any)((message: SiteNewBoxMessage, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
-    console.log(message)
+    popupLog.debug('onMessage(SiteNewBoxMessage): received', message)
 
     if (message.type === 'BOX_CREATED') {
         let boxData: BoxData = {
@@ -78,6 +98,7 @@ function addClickListener(boxData: BoxData) {
 
 // UI wiring for popup actions
 document.addEventListener('DOMContentLoaded', () => {
+    popupLog.info('DOMContentLoaded')
     const clearBtn = document.getElementById('clear-state') as HTMLButtonElement | null
     const compareBtn = document.getElementById('compare-state') as HTMLButtonElement | null
     const autoReloadEnabled = document.getElementById('auto-reload-enabled') as HTMLInputElement | null
@@ -95,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Load current auto-reload state
     ;(chrome.runtime.sendMessage as any)({ action: 'GET_AUTO_RELOAD_STATE' } as GetAutoReloadStateMessage, (resp: GetAutoReloadStateResponse) => {
+        popupLog.debug('GET_AUTO_RELOAD_STATE response', resp)
         if (autoReloadMinutes) autoReloadMinutes.value = String(Math.max(1, resp?.minutes ?? 5))
         if (autoReloadEnabled) autoReloadEnabled.checked = Boolean(resp?.enabled)
     })
@@ -120,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
     })
 
     clearBtn?.addEventListener('click', async () => {
+        popupLog.info('clear-state clicked')
         // clear stored baseline and popup list
         chrome.storage.local.remove(['capturedBoxesState', 'capturedBoxesStateAt', 'popupChangedListHtml'], () => {})
         const list = document.getElementById('changed-boxes-list') as HTMLDivElement | null
@@ -129,10 +152,11 @@ document.addEventListener('DOMContentLoaded', () => {
     })
 
     compareBtn?.addEventListener('click', async () => {
+        popupLog.info('compare-state clicked')
         try {
             const tabId = await getActiveTabId()
             chrome.tabs.sendMessage(tabId, { action: 'COMPARE_STATE' } as CompareStateMessage, undefined, (resp: CompareStateResponse) => {
-                console.log('Compared', resp)
+                popupLog.info('Compared response', resp)
                 const list = document.getElementById('changed-boxes-list')
                 if (!list || !resp) return
                 // clear old entries before showing new ones
@@ -152,13 +176,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (lastCapturedAtEl) lastCapturedAtEl.innerText = `Letzter Vergleich: ${formatData(now)}`
             })
         } catch (e) {
-            console.warn(e)
+            popupLog.warn('compare-state failed', e)
         }
     })
 
     function persistAutoReload() {
         const minutes = Math.max(1, Number(autoReloadMinutes?.value ?? 5))
         const enabled = Boolean(autoReloadEnabled?.checked)
+        popupLog.info('persistAutoReload', { enabled, minutes })
         ;(chrome.runtime.sendMessage as any)({ action: 'SET_AUTO_RELOAD', enabled, minutes } as SetAutoReloadMessage, () => {})
     }
 
@@ -174,6 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const tabId = await getActiveTabId()
                     const message: BoxChangedListClickedMessage = { action: 'showBox', boxId: id, tabId }
+                    popupLog.info('sending showBox to content script', { boxId: id, tabId })
                     chrome.tabs.sendMessage(tabId, message)
                 } catch {}
             }
