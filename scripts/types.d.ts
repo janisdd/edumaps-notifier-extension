@@ -48,6 +48,16 @@ type CompareStateResponse = {
 	removedBoxIds: string[]
 }
 
+// Popup -> Content script: fetch current boxes for UI
+type GetCurrentBoxesMessage = {
+	action: 'GET_CURRENT_BOXES'
+}
+
+type GetCurrentBoxesResponse = {
+	ok: true
+	boxes: Array<{ id: string; title: string }>
+}
+
 // Popup -> Service worker
 type SetAutoReloadMessage = {
 	action: 'SET_AUTO_RELOAD'
@@ -68,4 +78,14 @@ type GetAutoReloadStateResponse = {
 type NewBoxesFoundMessage = {
 	type: 'NEW_BOXES_FOUND'
 	count: number
+}
+
+type AutoCompareMessage = {
+	action: 'AUTO_COMPARE'
+	currentMap: Record<string, Box>
+}
+
+type CompareWithBaselineMessage = {
+	action: 'COMPARE_WITH_BASELINE'
+	currentMap: Record<string, Box>
 }

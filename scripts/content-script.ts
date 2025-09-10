@@ -244,39 +244,12 @@ function main() {
 	csLog.info('main: start')
 
 	// Automatically compute compare without overwriting baseline and persist a rendered result for the popup
-	chrome.storage.local.get(['capturedBoxesState', 'initializeBaselineOnNextLoad'], (items) => {
-		const prevMapObj = items['capturedBoxesState'] as Record<string, Box> | undefined
-		const shouldInit = Boolean(items['initializeBaselineOnNextLoad'])
-		csLog.debug('main: storage loaded', { hasBaseline: Boolean(prevMapObj), shouldInit })
-		if (!prevMapObj) {
-			if (shouldInit) {
-				csLog.info('main: initializing baseline on next load flag present, capturing baseline')
-				const current = getAllBoxes()
-				const baselineObj: Record<string, Box> = {}
-				for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
-				const capturedAt = (new Date()).toISOString()
-				chrome.storage.local.set({ capturedBoxesState: baselineObj, capturedBoxesStateAt: capturedAt, initializeBaselineOnNextLoad: false })
-			}
-			return
-		}
+	{
 		const current = getAllBoxes()
-		const currentMap = boxesToMap(current)
-		const prevIds = new Set(Object.keys(prevMapObj))
-		const currentIds = new Set(Array.from(currentMap.keys()))
-		const added: string[] = []
-		const removed: string[] = []
-		for (const id of currentIds) if (!prevIds.has(id)) added.push(id)
-		for (const id of prevIds) if (!currentIds.has(id)) removed.push(id)
-		const now = new Date()
-		const entries: string[] = []
-		for (const id of added) entries.push(`<div class=\"box-item\" data-box-id=\"${id}\"><div class=\"content\">Neue Box: ${id}</div><div class=\"time\">${now.toISOString()}</div></div>`)
-		chrome.storage.local.set({ popupChangedListHtml: entries.join(''), capturedBoxesStateAt: now.toISOString() })
-		if (added.length > 0) {
-			const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
-			csLog.info('main: notifying NEW_BOXES_FOUND', { count: added.length })
-			chrome.runtime.sendMessage(msg)
-		}
-	})
+		const currentMapObj: Record<string, Box> = {}
+		for (let i = 0; i < current.length; i++) currentMapObj[current[i].id] = current[i]
+		chrome.runtime.sendMessage({ action: 'AUTO_COMPARE', currentMap: currentMapObj })
+	}
 	// const handler = setInterval(checkBoxesChanged, 5000)
 
 	chrome.runtime.onMessage.addListener((message: BoxChangedListClickedMessage) => {
@@ -299,7 +272,7 @@ function main() {
 	})
 
 	// Listen for popup actions: capture/compare
-	chrome.runtime.onMessage.addListener((message: CaptureStateMessage | CompareStateMessage, _sender, sendResponse: (response?: any) => void) => {
+	chrome.runtime.onMessage.addListener((message: CaptureStateMessage | CompareStateMessage | GetCurrentBoxesMessage, _sender, sendResponse: (response?: any) => void) => {
 		if (!message || !('action' in message)) {
 			csLog.warn('onMessage: missing or invalid action')
 			return false
@@ -322,54 +295,23 @@ function main() {
 		}
 
 		if (message.action === 'COMPARE_STATE') {
-			csLog.info('onMessage: COMPARE_STATE')
-			chrome.storage.local.get(STORAGE_CAPTURED_STATE_KEY, (items) => {
-				const prevMapObj = items[STORAGE_CAPTURED_STATE_KEY] as Record<string, Box> | undefined
-				const current = getAllBoxes()
-				const currentMap = boxesToMap(current)
-
-				const added: string[] = []
-				const removed: string[] = []
-
-				if (!prevMapObj) {
-					// no previous baseline: set baseline but report no changes
-					// set new baseline to current
-					csLog.info('COMPARE_STATE: no baseline found, creating one')
-					const baselineObj: Record<string, Box> = {}
-					for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
-					const capturedAt = (new Date()).toISOString()
-					chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: baselineObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
-						sendResponse({ ok: true, addedBoxIds: [], removedBoxIds: [] } as CompareStateResponse)
-					})
-					return true
-				}
-
-				const prevIds = new Set(Object.keys(prevMapObj))
-				const currentIds = new Set(Array.from(currentMap.keys()))
-
-				for (const id of currentIds) {
-					if (!prevIds.has(id)) added.push(id)
-				}
-				for (const id of prevIds) {
-					if (!currentIds.has(id)) removed.push(id)
-				}
-
-				// set new baseline to current
-				const baselineObj: Record<string, Box> = {}
-				for (let i = 0; i < current.length; i++) baselineObj[current[i].id] = current[i]
-				const capturedAt = (new Date()).toISOString()
-				chrome.storage.local.set({ [STORAGE_CAPTURED_STATE_KEY]: baselineObj, [STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, async () => {
-					// notify service worker if there are new boxes
-					if (added.length > 0) {
-						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
-						csLog.info('COMPARE_STATE: notifying NEW_BOXES_FOUND', { count: added.length })
-						await chrome.runtime.sendMessage(msg)
-					}
-					csLog.info('COMPARE_STATE: done', { added: added.length, removed: removed.length })
-					sendResponse({ ok: true, addedBoxIds: added, removedBoxIds: removed } as CompareStateResponse)
-				})
+			csLog.info('onMessage: COMPARE_STATE (delegated)')
+			const current = getAllBoxes()
+			const currentMapObj: Record<string, Box> = {}
+			for (let i = 0; i < current.length; i++) currentMapObj[current[i].id] = current[i]
+			;(chrome.runtime.sendMessage as any)({ action: 'COMPARE_WITH_BASELINE', currentMap: currentMapObj } as CompareWithBaselineMessage, (resp: CompareStateResponse) => {
+				csLog.info('COMPARE_STATE: done (from SW)', resp)
+				sendResponse(resp)
 			})
 			return true
+		}
+
+		if (message.action === 'GET_CURRENT_BOXES') {
+			csLog.info('onMessage: GET_CURRENT_BOXES')
+			const boxes = getAllBoxes()
+			const simple = boxes.map(b => ({ id: b.id, title: b.title }))
+			sendResponse({ ok: true, boxes: simple } as GetCurrentBoxesResponse)
+			return false
 		}
 
 		return false

@@ -6,6 +6,14 @@ chrome.runtime.onInstalled.addListener(() => {
 })
 
 
+type SwBox = {
+	wrapId: string
+	id: string
+	title: string
+	top: number
+	left: number
+}
+
 type NotificationTuple = {
 	notificationId: string
 	boxId: string
@@ -19,6 +27,9 @@ let newlyCreatedBoxIds: string[] = []
 const STORAGE_AUTO_RELOAD_ENABLED = 'autoReloadEnabled'
 const STORAGE_AUTO_RELOAD_MINUTES = 'autoReloadMinutes'
 const ALARM_AUTO_RELOAD = 'autoReloadAlarm'
+
+const SW_STORAGE_CAPTURED_STATE_KEY = 'capturedBoxesState'
+const SW_STORAGE_CAPTURED_STATE_AT_KEY = 'capturedBoxesStateAt'
 
 // Simple structured logger for this file
 function createSwLogger(namespace: string) {
@@ -111,6 +122,94 @@ l.error('failed to create notification', e)
 
 
 //TODO currently only works with one tab...
+
+// --- Comparison logic owned by service worker ---
+
+function diffBoxIds(prev: Record<string, SwBox> | undefined, current: Record<string, SwBox>): { added: string[]; removed: string[] } {
+	const prevIds = new Set(Object.keys(prev || {}))
+	const currentIds = new Set(Object.keys(current))
+	const added: string[] = []
+	const removed: string[] = []
+	for (const id of currentIds) if (!prevIds.has(id)) added.push(id)
+	for (const id of prevIds) if (!currentIds.has(id)) removed.push(id)
+	return { added, removed }
+}
+
+async function compareWithBaseline(current: Record<string, SwBox>, updateBaseline: boolean): Promise<{ addedBoxIds: string[]; removedBoxIds: string[] }> {
+	return new Promise((resolve) => {
+		chrome.storage.local.get([SW_STORAGE_CAPTURED_STATE_KEY], (items) => {
+			const prevMapObj = items[SW_STORAGE_CAPTURED_STATE_KEY] as Record<string, SwBox> | undefined
+			const capturedAt = (new Date()).toISOString()
+			if (updateBaseline && !prevMapObj) {
+				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
+					resolve({ addedBoxIds: [], removedBoxIds: [] })
+				})
+				return
+			}
+			const { added, removed } = diffBoxIds(prevMapObj, current)
+			if (updateBaseline) {
+				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, async () => {
+					if (added.length > 0) {
+						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+						log.info('compareWithBaseline: notifying NEW_BOXES_FOUND', { count: added.length })
+						await chrome.runtime.sendMessage(msg)
+					}
+					resolve({ addedBoxIds: added, removedBoxIds: removed })
+				})
+			} else {
+				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => resolve({ addedBoxIds: added, removedBoxIds: removed }))
+			}
+		})
+	})
+}
+
+// Handle compare requests and auto-compare from content script
+chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (response?: any) => void) => {
+	if (!message || !('action' in message)) return false
+
+	if (message.action === 'COMPARE_WITH_BASELINE') {
+		const current = (message.currentMap || {}) as Record<string, SwBox>
+		log.info('onMessage: COMPARE_WITH_BASELINE', { currentCount: Object.keys(current).length })
+		compareWithBaseline(current, true).then((resp) => {
+			sendResponse({ ok: true, addedBoxIds: resp.addedBoxIds, removedBoxIds: resp.removedBoxIds } as CompareStateResponse)
+		})
+		return true
+	}
+
+	if (message.action === 'AUTO_COMPARE') {
+		const current = (message.currentMap || {}) as Record<string, SwBox>
+		log.info('onMessage: AUTO_COMPARE', { currentCount: Object.keys(current).length })
+		chrome.storage.local.get([SW_STORAGE_CAPTURED_STATE_KEY, 'initializeBaselineOnNextLoad'], (items) => {
+			const hasBaseline = Boolean(items[SW_STORAGE_CAPTURED_STATE_KEY])
+			const shouldInit = Boolean(items['initializeBaselineOnNextLoad'])
+			if (!hasBaseline) {
+				if (shouldInit) {
+					log.info('AUTO_COMPARE: initializing baseline on next load flag present, capturing baseline')
+					const capturedAt = (new Date()).toISOString()
+					chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt, initializeBaselineOnNextLoad: false }, () => {})
+				}
+				return false
+			}
+			const prev = items[SW_STORAGE_CAPTURED_STATE_KEY] as Record<string, SwBox>
+			const { added } = diffBoxIds(prev, current)
+			const now = new Date()
+			if (added.length > 0) {
+				const entries: string[] = []
+				for (const id of added) entries.push(`<div class=\"box-item\" data-box-id=\"${id}\"><div class=\"content\">Neue Box: ${id}</div><div class=\"time\">${now.toISOString()}</div></div>`)
+				chrome.storage.local.set({ popupChangedListHtml: entries.join(''), [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+				const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
+				log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: added.length })
+				chrome.runtime.sendMessage(msg)
+			} else {
+				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+			}
+			return false
+		})
+		return false
+	}
+
+	return false
+})
 
 // Manage auto-reload from popup
 chrome.runtime.onMessage.addListener((message: SetAutoReloadMessage | GetAutoReloadStateMessage, sender, sendResponse: (response?: any) => void) => {

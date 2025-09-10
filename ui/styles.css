@@ -1,7 +1,39 @@
 
-.popup-root, body, html {
+html, body {
     width: 360px;
     max-width: 360px;
+    height: var(--popup-height, 500px);
+    overflow: hidden;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+.tab-container {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: auto;
+}
+.tab-panels {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.tab-panels .tab-panel { display: none; }
+.tab-panels .tab-panel.active { display: block; }
+
+/* Make only lists scroll and fill remaining space */
+
+#current-boxes-list,
+#added-boxes-list {
+    overflow: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .changed-boxes-list {
@@ -36,3 +68,26 @@
     font-size: 11px;
     color: #666;
 }
+
+.tabs {
+    display: flex;
+    gap: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 8px;
+}
+
+.tab-btn {
+    padding: 6px 10px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.tab-btn.active {
+    border-bottom-color: #333;
+    font-weight: 600;
+}
+
+.tab-panels .tab-panel { display: none; }
+.tab-panels .tab-panel.active { display: block; }

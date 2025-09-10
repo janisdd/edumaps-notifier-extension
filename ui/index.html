@@ -24,10 +24,18 @@
       <small id="last-captured-at"></small>
     </section>
 
-    <section style="margin-top: 12px;">
-      <h3>Geänderte Boxen</h3>
-      <div>
-        <div id="changed-boxes-list" class="changed-boxes-list"></div>
+    <section class="tab-container" style="margin-top: 12px">
+      <div class="tabs">
+        <button id="tab-current" class="tab-btn active">Aktuelle Boxen</button>
+        <button id="tab-added" class="tab-btn">Neue Boxen</button>
+      </div>
+      <div class="tab-panels">
+        <div id="panel-current" class="tab-panel active">
+          <div id="current-boxes-list" class="changed-boxes-list"></div>
+        </div>
+        <div id="panel-added" class="tab-panel">
+          <div id="added-boxes-list" class="changed-boxes-list"></div>
+        </div>
       </div>
     </section>
 

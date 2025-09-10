@@ -1,0 +1,7 @@
+---
+description: basic info about the project
+globs:
+alwaysApply: true
+---
+
+The project is a chrom extension with manifest version 3. It will be used to capture the state of a website which contains different boxes. After a state (the boxes) is captured, it can be used to compare the old state to the current state and notify the user about changes.
