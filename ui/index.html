@@ -4,40 +4,45 @@
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <h1>Edu Maps Notifier</h1>
+    <div id="edu-ui" style="display: none;">
+      <h1>Edu Maps Notifier</h1>
 
-    <section>
-      <button id="clear-state">Clear state</button>
-      <button id="compare-state">Compare state</button>
-    </section>
+      <section>
+        <button id="capture-state">Capture state</button>
+        <button id="clear-state">Clear state</button>
+        <button id="compare-state">Compare state</button>
+      </section>
 
-    <section style="margin-top: 12px;">
-      <label>
-        <input type="checkbox" id="auto-reload-enabled" />
-        Auto reload every
-      </label>
-      <input id="auto-reload-minutes" type="number" min="1" value="5" style="width: 60px;" />
-      <span>minute(s)</span>
-    </section>
+      <section style="margin-top: 12px;">
+        <label>
+          <input type="checkbox" id="auto-reload-enabled" />
+          Auto reload every
+        </label>
+        <input id="auto-reload-minutes" type="number" min="1" value="5" style="width: 60px;" />
+        <span>minute(s)</span>
+      </section>
 
-    <section style="margin-top: 8px;">
-      <small id="last-captured-at"></small>
-    </section>
+      <section style="margin-top: 8px;">
+        <small id="last-captured-at"></small>
+      </section>
 
-    <section class="tab-container" style="margin-top: 12px">
-      <div class="tabs">
-        <button id="tab-current" class="tab-btn active">Aktuelle Boxen</button>
-        <button id="tab-added" class="tab-btn">Neue Boxen</button>
-      </div>
-      <div class="tab-panels">
-        <div id="panel-current" class="tab-panel active">
-          <div id="current-boxes-list" class="changed-boxes-list"></div>
+      <section class="tab-container" style="margin-top: 12px">
+        <div class="tabs">
+          <button id="tab-current" class="tab-btn active">Aktuelle Boxen</button>
+          <button id="tab-added" class="tab-btn">Neue Boxen</button>
         </div>
-        <div id="panel-added" class="tab-panel">
-          <div id="added-boxes-list" class="changed-boxes-list"></div>
+        <div class="tab-panels">
+          <div id="panel-current" class="tab-panel active">
+            <div id="current-boxes-list" class="changed-boxes-list"></div>
+          </div>
+          <div id="panel-added" class="tab-panel">
+            <div id="added-boxes-list" class="changed-boxes-list"></div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
+
+    <div id="not-edu" class="not-edu" style="display: none;">Not an Edu page</div>
 
     <script src="index.js"></script>
   </body>

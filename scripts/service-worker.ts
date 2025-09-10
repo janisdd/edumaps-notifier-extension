@@ -170,7 +170,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 	if (message.action === 'COMPARE_WITH_BASELINE') {
 		const current = (message.currentMap || {}) as Record<string, SwBox>
 		log.info('onMessage: COMPARE_WITH_BASELINE', { currentCount: Object.keys(current).length })
-		compareWithBaseline(current, true).then((resp) => {
+		compareWithBaseline(current, false).then((resp) => {
 			sendResponse({ ok: true, addedBoxIds: resp.addedBoxIds, removedBoxIds: resp.removedBoxIds } as CompareStateResponse)
 		})
 		return true
@@ -194,9 +194,12 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 			const { added } = diffBoxIds(prev, current)
 			const now = new Date()
 			if (added.length > 0) {
-				const entries: string[] = []
-				for (const id of added) entries.push(`<div class=\"box-item\" data-box-id=\"${id}\"><div class=\"content\">Neue Box: ${id}</div><div class=\"time\">${now.toISOString()}</div></div>`)
-				chrome.storage.local.set({ popupChangedListHtml: entries.join(''), [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+				chrome.storage.local.get(['popupChangedList'], (st) => {
+					const prevList = Array.isArray(st['popupChangedList']) ? (st['popupChangedList'] as any[]) : []
+					const newEntries = added.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
+					const merged = [...prevList, ...newEntries]
+					chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+				})
 				const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
 				log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: added.length })
 				chrome.runtime.sendMessage(msg)
