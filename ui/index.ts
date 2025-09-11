@@ -181,6 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const captureBtn = document.getElementById('capture-state') as HTMLButtonElement | null
         const clearBtn = document.getElementById('clear-state') as HTMLButtonElement | null
         const compareBtn = document.getElementById('compare-state') as HTMLButtonElement | null
+        const testNotifBtn = document.getElementById('test-notification') as HTMLButtonElement | null
         const autoReloadEnabled = document.getElementById('auto-reload-enabled') as HTMLInputElement | null
         const autoReloadMinutes = document.getElementById('auto-reload-minutes') as HTMLInputElement | null
 
@@ -291,6 +292,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             } catch (e) {
                 popupLog.warn('compare-state failed', e)
+            }
+        })
+
+        testNotifBtn?.addEventListener('click', async () => {
+            popupLog.info('test-notification clicked')
+            try {
+                const tabId = await getActiveTabId()
+                const msg: any = { action: 'TEST_NOTIFICATION', tabId }
+                ;(chrome.runtime.sendMessage as any)(msg, () => {})
+            } catch (e) {
+                popupLog.warn('test-notification failed', e)
             }
         })
 

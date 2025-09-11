@@ -5,6 +5,24 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log("[service-worker] Extension installed")
 })
 
+// Handle test notification from popup
+chrome.runtime.onMessage.addListener((message: any, _sender, _sendResponse) => {
+    if (!message || message.action !== 'TEST_NOTIFICATION') return false
+    log.info('TEST_NOTIFICATION: creating dummy notification')
+    try {
+        chrome.notifications.create({
+            type: 'basic',
+            iconUrl: '/imgs/icon.png',
+            title: 'Testbenachrichtigung',
+            message: 'Dies ist eine Testbenachrichtigung',
+            priority: 0,
+        })
+    } catch (e) {
+        log.warn('TEST_NOTIFICATION failed', e)
+    }
+    return false
+})
+
 
 type SwBox = {
 	wrapId: string
@@ -224,6 +242,23 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 		const current = (message.currentMap || {}) as Record<string, SwBox>
 		log.info('onMessage: COMPARE_WITH_BASELINE', { currentCount: Object.keys(current).length })
 		compareWithBaseline(current, false).then((resp) => {
+			// Create summary notification for boxes not yet notified since baseline
+			const trulyNewIds = resp.addedBoxIds.filter(id => !newBoxNotificationMap[id])
+			if (trulyNewIds.length > 0) {
+				log.info('COMPARE_WITH_BASELINE: creating summary notification', { count: trulyNewIds.length })
+				try {
+					chrome.notifications.create({
+						type: 'basic',
+						iconUrl: '/imgs/icon.png',
+						title: 'Neue Boxen gefunden',
+						message: `${trulyNewIds.length} neue Box(en) gefunden`,
+						priority: 0,
+					})
+				} catch (e) {
+					log.warn('COMPARE_WITH_BASELINE: failed to create summary notification', e)
+				}
+			}
+			// Return original diff for UI rendering
 			sendResponse({ ok: true, addedBoxIds: resp.addedBoxIds, removedBoxIds: resp.removedBoxIds } as CompareStateResponse)
 		})
 		return true
