@@ -143,6 +143,26 @@ function toggleUiVisibility(showEduUi: boolean) {
         })
     }
 
+    if ((message as any)?.type === 'NEW_BOXES_FOUND') {
+        // Re-render the added list from storage and update the timestamp label
+        const addedListEl = document.getElementById('added-boxes-list') as HTMLDivElement | null
+        chrome.storage.local.get(['popupChangedList'], (items) => {
+            const list = Array.isArray(items['popupChangedList']) ? (items['popupChangedList'] as PopupChangeEntry[]) : []
+            if (addedListEl) {
+                addedListEl.innerHTML = renderChangeList(list)
+                attachAddedItemClickHandlers()
+            }
+        })
+        const lastCapturedAtEl = document.getElementById('last-captured-at') as HTMLSpanElement | null
+        chrome.storage.local.get('capturedBoxesStateAt', (st) => {
+            const iso = st['capturedBoxesStateAt'] as string | undefined
+            if (iso && lastCapturedAtEl) {
+                const d = new Date(iso)
+                lastCapturedAtEl.innerText = `Letzter Vergleich: ${formatData(d)}`
+            }
+        })
+    }
+
     return false
 })
 
@@ -375,12 +395,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // Listen to active tab switches and URL updates while popup is open
     chrome.tabs.onActivated.addListener(() => refreshUiForActiveTab())
     chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
-        if (tab && tab.active && typeof changeInfo.url === 'string') {
+        if (!tab || !tab.active) return
+        if (typeof changeInfo.url === 'string' || changeInfo.status === 'complete') {
             refreshUiForActiveTab()
         }
     })
 
     // Initial render
     refreshUiForActiveTab()
+
+    // Keep UI in sync with background updates while popup is open
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+        if (areaName !== 'local') return
+        if (changes['popupChangedList']) {
+            const list = Array.isArray(changes['popupChangedList'].newValue) ? (changes['popupChangedList'].newValue as PopupChangeEntry[]) : []
+            const addedListEl = document.getElementById('added-boxes-list') as HTMLDivElement | null
+            if (addedListEl) {
+                addedListEl.innerHTML = renderChangeList(list)
+                attachAddedItemClickHandlers()
+            }
+        }
+        if (changes['capturedBoxesStateAt']) {
+            const iso = changes['capturedBoxesStateAt'].newValue as string | undefined
+            const lastCapturedAtEl = document.getElementById('last-captured-at') as HTMLSpanElement | null
+            if (iso && lastCapturedAtEl) {
+                const d = new Date(iso)
+                lastCapturedAtEl.innerText = `Letzter Vergleich: ${formatData(d)}`
+            }
+        }
+    })
 })
 
