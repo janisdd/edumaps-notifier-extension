@@ -256,13 +256,25 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 			if (trulyNew.length > 0) {
 				chrome.storage.local.get(['popupChangedList'], (st) => {
 					const prevList = Array.isArray(st['popupChangedList']) ? (st['popupChangedList'] as any[]) : []
-					const newEntries = trulyNew.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
-					const merged = [...prevList, ...newEntries]
-					chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+					// Deduplicate against existing 'added' entries in popup list
+					const existingAddedIds = new Set(
+						prevList
+							.filter((e: any) => e && e.type === 'added' && typeof e.boxId === 'string')
+							.map((e: any) => e.boxId)
+					)
+					const filteredNewIds = trulyNew.filter(id => !existingAddedIds.has(id))
+					if (filteredNewIds.length > 0) {
+						const newEntries = filteredNewIds.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
+						const merged = [...prevList, ...newEntries]
+						chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: filteredNewIds.length }
+						log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: filteredNewIds.length })
+						chrome.runtime.sendMessage(msg)
+					} else {
+						// No truly new entries compared to what popup already shows; update timestamp only
+						chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+					}
 				})
-				const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: trulyNew.length }
-				log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: trulyNew.length })
-				chrome.runtime.sendMessage(msg)
 			} else {
 				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
 			}
