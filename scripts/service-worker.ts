@@ -51,6 +51,7 @@ const ALARM_AUTO_RELOAD = 'autoReloadAlarm'
 
 const SW_STORAGE_CAPTURED_STATE_KEY = 'capturedBoxesState'
 const SW_STORAGE_CAPTURED_STATE_AT_KEY = 'capturedBoxesStateAt'
+const SW_STORAGE_NOTIFIED_IDS_KEY = 'notifiedBoxIds'
 
 // Simple structured logger for this file
 function createSwLogger(namespace: string) {
@@ -100,9 +101,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 		if (isAutoCapturingBaseline) {
 			l.info('captured state changed (auto) -> clearing map only')
 			clearNewBoxMapOnly()
+			chrome.storage.local.set({ [SW_STORAGE_NOTIFIED_IDS_KEY]: [] }, () => {})
 		} else {
 			l.info('captured state changed (manual) -> clearing notifications and map')
 			clearNewBoxNotificationsAndMap()
+			chrome.storage.local.set({ [SW_STORAGE_NOTIFIED_IDS_KEY]: [] }, () => {})
 		}
 	}
 })
@@ -242,21 +245,32 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 		const current = (message.currentMap || {}) as Record<string, SwBox>
 		log.info('onMessage: COMPARE_WITH_BASELINE', { currentCount: Object.keys(current).length })
 		compareWithBaseline(current, false).then((resp) => {
-			// Create summary notification for boxes not yet notified since baseline
+			// Create individual notifications (with box titles) for boxes not yet notified since baseline
 			const trulyNewIds = resp.addedBoxIds.filter(id => !newBoxNotificationMap[id])
 			if (trulyNewIds.length > 0) {
-				log.info('COMPARE_WITH_BASELINE: creating summary notification', { count: trulyNewIds.length })
-				try {
-					chrome.notifications.create({
-						type: 'basic',
-						iconUrl: '/imgs/icon.png',
-						title: 'Neue Boxen gefunden',
-						message: `${trulyNewIds.length} neue Box(en) gefunden`,
-						priority: 0,
-					})
-				} catch (e) {
-					log.warn('COMPARE_WITH_BASELINE: failed to create summary notification', e)
-				}
+				chrome.storage.local.get([SW_STORAGE_NOTIFIED_IDS_KEY], async (st) => {
+					const alreadyNotified: string[] = Array.isArray(st[SW_STORAGE_NOTIFIED_IDS_KEY]) ? (st[SW_STORAGE_NOTIFIED_IDS_KEY] as string[]) : []
+					const toNotify = trulyNewIds.filter(id => !alreadyNotified.includes(id))
+					if (toNotify.length > 0) {
+						for (const id of toNotify) {
+							const box = current[id]
+							const title = box?.title || `Neue Box`
+							try {
+								const nId = await chrome.notifications.create({
+									type: 'basic',
+									iconUrl: '/imgs/icon.png',
+									title: 'Neue Box gefunden',
+									message: title,
+									priority: 0,
+								})
+								newBoxNotificationMap[id] = nId
+							} catch (e) {
+								log.warn('COMPARE_WITH_BASELINE: failed to create notification for box', { id, error: e })
+							}
+						}
+						chrome.storage.local.set({ [SW_STORAGE_NOTIFIED_IDS_KEY]: [...new Set([...alreadyNotified, ...toNotify])] }, () => {})
+					}
+				})
 			}
 			// Return original diff for UI rendering
 			sendResponse({ ok: true, addedBoxIds: resp.addedBoxIds, removedBoxIds: resp.removedBoxIds } as CompareStateResponse)
@@ -289,25 +303,29 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 			const trulyNew = added.filter(id => !newBoxNotificationMap[id])
 			const now = new Date()
 			if (trulyNew.length > 0) {
-				chrome.storage.local.get(['popupChangedList'], (st) => {
+				chrome.storage.local.get(['popupChangedList', SW_STORAGE_NOTIFIED_IDS_KEY], async (st) => {
 					const prevList = Array.isArray(st['popupChangedList']) ? (st['popupChangedList'] as any[]) : []
-					// Deduplicate against existing 'added' entries in popup list
-					const existingAddedIds = new Set(
-						prevList
-							.filter((e: any) => e && e.type === 'added' && typeof e.boxId === 'string')
-							.map((e: any) => e.boxId)
-					)
-					const filteredNewIds = trulyNew.filter(id => !existingAddedIds.has(id))
-					if (filteredNewIds.length > 0) {
-						const newEntries = filteredNewIds.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
-						const merged = [...prevList, ...newEntries]
-						chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
-						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: filteredNewIds.length }
-						log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: filteredNewIds.length })
-						chrome.runtime.sendMessage(msg)
-					} else {
-						// No truly new entries compared to what popup already shows; update timestamp only
-						chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
+					const alreadyNotified: string[] = Array.isArray(st[SW_STORAGE_NOTIFIED_IDS_KEY]) ? (st[SW_STORAGE_NOTIFIED_IDS_KEY] as string[]) : []
+					const toNotify = trulyNew.filter(id => !alreadyNotified.includes(id))
+					const newEntries = toNotify.map(id => ({ type: 'added', boxId: id, at: now.toISOString(), title: (current[id]?.title || undefined) }))
+					const merged = [...prevList, ...newEntries]
+					chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString(), [SW_STORAGE_NOTIFIED_IDS_KEY]: [...new Set([...alreadyNotified, ...toNotify])] }, () => {})
+					// Create individual notifications with titles for each new box
+					for (const id of toNotify) {
+						const box = current[id]
+						const title = box?.title || `Neue Box`
+						try {
+							const nId = await chrome.notifications.create({
+								type: 'basic',
+								iconUrl: '/imgs/icon.png',
+								title: 'Neue Box gefunden',
+								message: title,
+								priority: 0,
+							})
+							newBoxNotificationMap[id] = nId
+						} catch (e) {
+							log.warn('AUTO_COMPARE: failed to create notification for box', { id, error: e })
+						}
 					}
 				})
 			} else {

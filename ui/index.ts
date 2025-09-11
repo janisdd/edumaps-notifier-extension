@@ -9,6 +9,7 @@ type PopupChangeEntry = {
     type: 'added' | 'removed'
     boxId: string
     at: string // ISO string
+    title?: string
 }
 
 /**
@@ -46,7 +47,8 @@ function renderChangeEntry(entry: PopupChangeEntry): string {
     const cls = entry.type === 'removed' ? 'box-item removed' : 'box-item'
     const label = entry.type === 'removed' ? 'Entfernte Box' : 'Neue Box'
     const when = formatData(new Date(entry.at))
-    return `<div class="${cls}" data-box-id="${entry.boxId}"><div class="content">${label}: ${entry.boxId}</div><div class="time">${when}</div></div>`
+    const display = entry.title && entry.title.trim().length > 0 ? entry.title : entry.boxId
+    return `<div class="${cls}" data-box-id="${entry.boxId}"><div class="content">${display}</div><div class="time">${when}</div></div>`
 }
 
 function renderChangeList(entries: PopupChangeEntry[]): string {
@@ -277,13 +279,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     // clear old entries before showing new ones
                     ;(list as HTMLDivElement).innerHTML = ''
                     const now = new Date()
-                    const jsonEntries: PopupChangeEntry[] = [
-                        ...resp.addedBoxIds.map(id => ({ type: 'added' as const, boxId: id, at: now.toISOString() })),
-                        ...resp.removedBoxIds.map(id => ({ type: 'removed' as const, boxId: id, at: now.toISOString() })),
-                    ]
-                    ;(list as HTMLDivElement).innerHTML = renderChangeList(jsonEntries)
-                    attachAddedItemClickHandlers()
-                    chrome.storage.local.set({ popupChangedList: jsonEntries })
+                    // Fetch current titles to display instead of IDs
+                    chrome.tabs.sendMessage(tabId, { action: 'GET_CURRENT_BOXES' } as GetCurrentBoxesMessage, undefined, (boxesResp: GetCurrentBoxesResponse) => {
+                        const titleById = new Map<string, string>()
+                        if (boxesResp && boxesResp.ok) {
+                            boxesResp.boxes.forEach(b => titleById.set(b.id, b.title))
+                        }
+                        const jsonEntries: PopupChangeEntry[] = [
+                            ...resp.addedBoxIds.map(id => ({ type: 'added' as const, boxId: id, at: now.toISOString(), title: titleById.get(id) })),
+                            ...resp.removedBoxIds.map(id => ({ type: 'removed' as const, boxId: id, at: now.toISOString(), title: titleById.get(id) })),
+                        ]
+                        ;(list as HTMLDivElement).innerHTML = renderChangeList(jsonEntries)
+                        attachAddedItemClickHandlers()
+                        chrome.storage.local.set({ popupChangedList: jsonEntries })
+                    })
                     // update last captured time label
                     const lastCapturedAtEl3 = document.getElementById('last-captured-at') as HTMLSpanElement | null
                     if (lastCapturedAtEl3) lastCapturedAtEl3.innerText = `Letzter Vergleich: ${formatData(now)}`
