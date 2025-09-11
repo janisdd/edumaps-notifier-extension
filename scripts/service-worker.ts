@@ -21,7 +21,10 @@ type NotificationTuple = {
 	sourceTabId: number
 }
 
-let newlyCreatedBoxIds: string[] = []
+// Map of boxId -> chrome notificationId
+let newBoxNotificationMap: Record<string, string> = {}
+// Flag used to distinguish automatic baseline capture from manual capture
+let isAutoCapturingBaseline = false
 // let notificationTuples: Array<NotificationTuple> = []
 
 const STORAGE_AUTO_RELOAD_ENABLED = 'autoReloadEnabled'
@@ -47,13 +50,55 @@ function createSwLogger(namespace: string) {
 
 const log = createSwLogger('')
 
+// Helpers to manage notification map and lifecycle
+async function clearNewBoxNotificationsAndMap() {
+	const l = createSwLogger('clearNewBoxNotificationsAndMap')
+	try {
+		const ids = Object.values(newBoxNotificationMap)
+		if (ids.length > 0) l.info('clearing notifications', { count: ids.length })
+		await Promise.all(ids.map(id => {
+			return new Promise<void>((resolve) => {
+				try {
+					chrome.notifications.clear(id, () => resolve())
+				} catch {
+					resolve()
+				}
+			})
+		}))
+	} finally {
+		newBoxNotificationMap = {}
+	}
+}
+
+function clearNewBoxMapOnly() {
+	newBoxNotificationMap = {}
+}
+
+// Clear notifications and map whenever a new baseline is captured (manual capture writes this key)
+chrome.storage.onChanged.addListener((changes, areaName) => {
+	if (areaName !== 'local') return
+	if (changes && changes[SW_STORAGE_CAPTURED_STATE_KEY]) {
+		const l = createSwLogger('storage.onChanged')
+		if (isAutoCapturingBaseline) {
+			l.info('captured state changed (auto) -> clearing map only')
+			clearNewBoxMapOnly()
+		} else {
+			l.info('captured state changed (manual) -> clearing notifications and map')
+			clearNewBoxNotificationsAndMap()
+		}
+	}
+})
+
 // Add this listener
 chrome.runtime.onMessage.addListener((message: SiteNewBoxMessage, sender) => {
 	log.debug('onMessage(SiteNewBoxMessage): received', { type: (message as any)?.type, fromTab: sender.tab?.id })
 
 	if (message.type === 'BOX_CREATED' && sender.tab?.id) {
-		let boxId = message.boxId as string
-		newlyCreatedBoxIds.push(boxId)
+		const boxId = message.boxId as string
+		if (newBoxNotificationMap[boxId]) {
+			log.debug('BOX_CREATED: notification already exists for box, skipping', { boxId })
+			return false
+		}
 		log.info('BOX_CREATED: creating notification', { boxId, boxWrapId: message.boxWrapId, tabId: sender.tab.id })
 		createNewBoxNotification(boxId, message.boxWrapId, sender.tab.id)
 	}
@@ -89,6 +134,8 @@ let nId = await chrome.notifications.create({
     priority: 0,
   })
 l.info('created', { notificationId: nId })
+// Track mapping so we don't notify for the same box twice until baseline resets
+newBoxNotificationMap[boxId] = nId
 //   notificationTuples.push({notificationId: nId, boxId: boxId, boxWrapId: boxWrapId, sourceTabId: sourceTabId})
 } catch (e) {
 l.error('failed to create notification', e)
@@ -141,7 +188,9 @@ async function compareWithBaseline(current: Record<string, SwBox>, updateBaselin
 			const prevMapObj = items[SW_STORAGE_CAPTURED_STATE_KEY] as Record<string, SwBox> | undefined
 			const capturedAt = (new Date()).toISOString()
 			if (updateBaseline && !prevMapObj) {
-				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, () => {
+				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, async () => {
+					// New state captured (manual): clear notifications and map
+					await clearNewBoxNotificationsAndMap()
 					resolve({ addedBoxIds: [], removedBoxIds: [] })
 				})
 				return
@@ -149,11 +198,15 @@ async function compareWithBaseline(current: Record<string, SwBox>, updateBaselin
 			const { added, removed } = diffBoxIds(prevMapObj, current)
 			if (updateBaseline) {
 				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt }, async () => {
-					if (added.length > 0) {
-						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
-						log.info('compareWithBaseline: notifying NEW_BOXES_FOUND', { count: added.length })
+					// Use map to determine truly new boxes for summary; but baseline is being reset now
+					const trulyNew = added.filter(id => !newBoxNotificationMap[id])
+					if (trulyNew.length > 0) {
+						const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: trulyNew.length }
+						log.info('compareWithBaseline: notifying NEW_BOXES_FOUND', { count: trulyNew.length })
 						await chrome.runtime.sendMessage(msg)
 					}
+					// New state captured (manual): clear notifications and map
+					await clearNewBoxNotificationsAndMap()
 					resolve({ addedBoxIds: added, removedBoxIds: removed })
 				})
 			} else {
@@ -186,22 +239,29 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse: (resp
 				if (shouldInit) {
 					log.info('AUTO_COMPARE: initializing baseline on next load flag present, capturing baseline')
 					const capturedAt = (new Date()).toISOString()
-					chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt, initializeBaselineOnNextLoad: false }, () => {})
+					isAutoCapturingBaseline = true
+					chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_KEY]: current, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: capturedAt, initializeBaselineOnNextLoad: false }, () => {
+						// Automatic capture: if there are no new boxes (relative to map), clear the map.
+						// In this branch baseline did not exist before, so treat as no new boxes and clear map only.
+						clearNewBoxMapOnly()
+						isAutoCapturingBaseline = false
+					})
 				}
 				return false
 			}
 			const prev = items[SW_STORAGE_CAPTURED_STATE_KEY] as Record<string, SwBox>
 			const { added } = diffBoxIds(prev, current)
+			const trulyNew = added.filter(id => !newBoxNotificationMap[id])
 			const now = new Date()
-			if (added.length > 0) {
+			if (trulyNew.length > 0) {
 				chrome.storage.local.get(['popupChangedList'], (st) => {
 					const prevList = Array.isArray(st['popupChangedList']) ? (st['popupChangedList'] as any[]) : []
-					const newEntries = added.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
+					const newEntries = trulyNew.map(id => ({ type: 'added', boxId: id, at: now.toISOString() }))
 					const merged = [...prevList, ...newEntries]
 					chrome.storage.local.set({ popupChangedList: merged, [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
 				})
-				const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: added.length }
-				log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: added.length })
+				const msg: NewBoxesFoundMessage = { type: 'NEW_BOXES_FOUND', count: trulyNew.length }
+				log.info('AUTO_COMPARE: notifying NEW_BOXES_FOUND', { count: trulyNew.length })
 				chrome.runtime.sendMessage(msg)
 			} else {
 				chrome.storage.local.set({ [SW_STORAGE_CAPTURED_STATE_AT_KEY]: now.toISOString() }, () => {})
