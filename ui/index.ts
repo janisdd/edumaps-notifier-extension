@@ -123,7 +123,7 @@ function isEduUrl(url: string | undefined): boolean {
 function toggleUiVisibility(showEduUi: boolean) {
     const edu = document.getElementById('edu-ui') as HTMLDivElement | null
     const notEdu = document.getElementById('not-edu') as HTMLDivElement | null
-    if (edu) edu.style.display = showEduUi ? 'block' : 'none'
+    if (edu) edu.style.display = showEduUi ? 'flex' : 'none'
     if (notEdu) notEdu.style.display = showEduUi ? 'none' : 'block'
 }
 

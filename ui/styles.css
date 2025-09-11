@@ -6,6 +6,12 @@ html, body {
     overflow: hidden;
 }
 
+#edu-ui {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
 body {
     display: flex;
     flex-direction: column;
@@ -23,6 +29,7 @@ body {
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    padding-bottom: 0.25rem;
 }
 
 .tab-panels .tab-panel { display: none; }
